@@ -456,6 +456,7 @@ left join team_stats_temp3 b
   and a.week = b.week
 where a.week != 1")
 
+#Using TIME SERIES Analysis to help understand the relationship between the offense Points over time as the NFL developed the past 20 years
 MOP <-team_stats_game4 %>%
   group_by(season,week)%>%
   summarize(mean = mean(Offensive_Points))
@@ -482,7 +483,7 @@ autoplot(DMOP)+
 
 ```
 
-# Attempt at a simple model to understand offensive rankings vs 
+# Attempt at a simple model to understand offensive rating vs final score
 ```{r}
 df_final <- sqldf("select team
 , season
