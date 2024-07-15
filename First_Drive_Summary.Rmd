@@ -386,8 +386,8 @@ team_stats_game2 <- sqldf(" select team
 
 MV2 <-NULL
 for (i in 1:15){
-  MV2[i] <- sum(is.na(train[i]))
-  print(names(train)[i])
+  MV2[i] <- sum(is.na(team_stats_game2[i]))
+  print(names(team_stats_game2)[i])
   print(MV2[i])
 }
 
