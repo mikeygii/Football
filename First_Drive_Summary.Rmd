@@ -409,6 +409,7 @@ team_stats_temp <- (sqldf("select team
 , Defensive_Points
 , sum(Defensive_Points) OVER (partition by team Order by Season, Week) as Cumulative_DEF_Points
 , Coalesce(lag(Defensive_Points,1) OVER (partition by team Order by Season, Week),0) as Lag_DEF_Points
+, COUNT(*) OVER (PARTITION BY  team Order by Season, Week) AS count
 from team_stats_game3"))
 
 team_stats_temp2 <- sqldf("select *
@@ -447,6 +448,7 @@ team_stats_game4 <- sqldf("select a.*
 , b.Cumulative_DEF_Rank
 , b.Lag_DEF_Points
 , b.Lag_DEF_Rank
+, a.season||'0'||a.week as period
 from team_stats_game3 a
 left join team_stats_temp3 b
   on a.team = b.team
@@ -454,6 +456,34 @@ left join team_stats_temp3 b
   and a.week = b.week
 where a.week != 1")
 
+MOP <-team_stats_game4 %>%
+  group_by(season,week)%>%
+  summarize(mean = mean(Offensive_Points))
+
+DMOP <- ts(MOP$mean, start = 2001,frequency = 12)
+
+ggplot2::autoplot(DMOP)+labs(title = "Offensive Score by Year", x = "Date", y = "Mean Offensive Rating")
+
+decomp_stl <- stl(DMOP, s.window = 7)
+
+autoplot(decomp_stl)
+
+# Creating decomp variables
+seas_adj <-DMOP-decomp_stl$time.series[,1]
+trend <- decomp_stl$time.series[,2]
+cycle <- decomp_stl$time.series[,1]
+
+#first two graphs
+autoplot(DMOP)+
+  geom_line(aes(y=trend),color="blue")
+  
+autoplot(DMOP)+
+  geom_line(aes(y=seas_adj),color="orange")
+
+```
+
+# Attempt at a simple model to understand offensive rankings vs 
+```{r}
 df_final <- sqldf("select team
 , season
 , week
@@ -524,6 +554,13 @@ partialPlot(rf_model2, train,Carats)
 
 View(data.frame(id = test$team, test$season, test$week, actual_off_score = test$team_score, predicted_off_score = predictions, diff = test$team_score-predictions))
 ```
+
+
+
+
+
+
+
 
 #Aggregating the games into a full season summary table while also calculating total fantasy points for the teams
 #Fantasy points act a good measurement for how a team performed over the season 
