@@ -1,0 +1,554 @@
+---
+title: "NFL_FASTR_BSE"
+author: "MIKEY"
+date: "12/18/2023"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#install.packages(c('nflfastR', 'nflreadr', 'nflplotR', 'sqldf'))
+
+library(nflfastR)
+library(tidyverse)
+library(ggrepel)
+library(nflreadr)
+library(nflplotR)
+library(sqldf)
+library(ggplot2)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+# PLAY BY PLAY 
+## This will load all play by play data into a data frame called pbp there are over 40,000 rows with 372 columns this is for only 2023. For more data use (2000:2023).
+
+```{r}
+pbp <- load_pbp(2023)
+
+#write.csv(pbp, "C:\\Users\\mikey\\OneDrive\\Documents\\Madden\\pbp", row.names=FALSE)
+```
+
+## GAME SUMMARY
+
+### Trying to create a game summary that will allow us to roll up to player and teams stats for careers single season. Currently needs more columns to track players and should be changed to drive summary and then rolled up to game data.
+
+```{r}
+game_summary <- sqldf("select game_id
+              , qtr
+              , time
+              , play_id 
+              , home_team
+              , away_team
+              , posteam
+              , defteam
+              , yrdln
+              , season_type
+              , season
+              , week
+              , game_date
+              , rush_attempt
+              , pass_attempt
+              , sack
+              , interception
+              , case when pass_defense_1_player_name is not null then 1 else 0 end as pass_defended1
+              , case when pass_defense_2_player_name is not null then 1 else 0 end as pass_defended2
+              , fumble_forced
+              , fumble_lost
+              , touchdown
+              , pass_touchdown
+              , rush_touchdown
+              , return_touchdown
+              , extra_point_attempt
+              , two_point_attempt
+              , field_goal_attempt
+              , kickoff_attempt
+              , punt_attempt
+              , fumble
+              , complete_pass
+              , passing_yards
+              , receiving_yards
+              , rushing_yards
+              , special
+              , return_team
+              , return_yards
+              , fourth_down_converted
+              , fourth_down_failed
+              , third_down_converted
+              , third_down_failed
+              , penalty_team
+              , case when penalty_team=defteam then 1 else 0 end as def_penalty
+              , case when penalty_team=posteam then 1 else 0 end as off_penalty
+              , penalty_yards
+              , penalty_type
+              , away_score
+              , home_score
+              , (away_score + home_score) as total_score
+              , total
+              , total_line
+              , spread_line
+              , div_game
+              , roof
+              , surface
+              , first_down
+from pbp
+order by game_date, game_id, qtr, time desc")
+
+
+
+
+```
+
+# Bettign Summary
+
+## Using this as a way to understand teams record for spread and over/unders. Not really useful for models.
+
+```{r}
+betting_summary <- sqldf("select distinct season_type
+              , season
+              , week
+              , game_date
+              , home_team || away_team as matchup
+              , home_team
+              , away_team
+              , away_score
+              , home_score
+              , total
+              , total_line
+              , home_score - away_score as spread
+              , spread_line
+              , div_game
+              , roof
+              , surface
+from pbp")
+
+
+#write.csv(betting_summary, "C:\\Users\\mikey\\OneDrive\\Documents\\Madden\\Betting_Summary.csv", row.names=FALSE)
+
+```
+
+# Team Stats trying to create team stats for Defense and Offense while also using fantasy Points to create rankings for each team. I realize now that I should create these on a play by play level so that I can roll them up to any level possible.
+
+```{r}
+def_stats_game <- sqldf("select defteam
+              , game_date
+              , season
+              , week
+              , max(home_team) as home_team
+              , max(away_team) as away_team
+              , max(div_game) as div_game
+              , max(roof) as roof
+              , max(surface) as surface
+              , max(away_score) as away_score
+              , max(home_score) as home_score
+              , max(total) as total
+              , max(total_line) as total_line
+              , max(spread_line) as spread_line
+              , sum(pass_attempt) as def_pass_attempt
+              , sum(complete_pass) as def_complete_pass
+              , sum(passing_yards) as def_passing_yards
+              , sum(pass_touchdown) as def_pass_touchdown
+              , sum(interception) as def_interception
+              , sum(pass_defended1) as def_pass_defended
+              , sum(pass_defended1) + sum(pass_defended2) as def_pass_defended_adj
+              , sum(rush_attempt) as def_rush_attempt
+              , sum(rushing_yards) as def_rushing_yards
+              , sum(rush_touchdown) as def_rush_touchdown
+              , sum(sack) as def_sack
+              , sum(fumble_forced) as def_fumble_forced
+              , sum(fumble_lost) as def_fumble_lost
+              , sum(first_down) as def_first_down
+              , sum(fourth_down_converted) as def_fourth_down_converted
+              , sum(fourth_down_failed) as def_fourth_down_failed
+              , sum(third_down_converted) as def_third_down_converted
+              , sum(third_down_failed) as def_third_down_failed
+              , sum(def_penalty) def_penalty
+from game_summary
+where defteam is not NULL and season_type like 'REG'
+group by 1,2,3, 4
+order by game_date, season, week, defteam")
+
+
+off_stats_game <- sqldf("select posteam
+              , game_date
+              , season
+              , week
+              , case when posteam = max(home_team) then 1 else 0 end as home_adv
+              , case when posteam = max(home_team) then max(away_team) else max(home_team) end as opponent
+              , max(div_game) as div_game
+              , max(roof) as roof
+              , max(surface) as surface
+              , case when posteam = max(home_team) then max(home_score) else max(away_score) end as team_score
+              , case when posteam != max(home_team) then max(home_score) else max(away_score) end as opponent_score
+              , max(away_score) as away_score
+              , max(home_score) as home_score
+              , max(total) as total
+              , max(total_line) as total_line
+              , case when max(total) > max(total_line) then 1 else 0 end as over_covered
+              , max(spread_line) as spread_line
+              , sum(pass_attempt) as off_pass_attempt
+              , sum(complete_pass) as off_complete_pass
+              , sum(passing_yards) as off_passing_yards
+              , sum(pass_touchdown) as off_pass_touchdown
+              , sum(interception) as off_interception
+              , sum(pass_defended1) as off_pass_defended
+              , sum(pass_defended1) + sum(pass_defended2) as off_pass_defended_adj
+              , sum(rush_attempt) as off_rush_attempt
+              , sum(rushing_yards) as off_rushing_yards
+              , sum(rush_touchdown) as off_rush_touchdown
+              , sum(sack) as off_sack
+              , sum(fumble_forced) as off_fumble_forced
+              , sum(fumble_lost) as off_fumble_lost
+              , sum(first_down) as off_first_down
+              , sum(fourth_down_converted) as off_fourth_down_converted
+              , sum(fourth_down_failed) as off_fourth_down_failed
+              , sum(third_down_converted) as off_third_down_converted
+              , sum(third_down_failed) as off_third_down_failed
+              , sum(off_penalty) off_penalty
+from game_summary
+where posteam is not NULL and season_type like 'REG'
+group by 1,2,3, 4
+order by game_date, season, week, posteam")
+
+
+
+team_stats_game <- sqldf("select a.posteam as team
+                                , a.home_adv
+                                , a.opponent
+                                , a.game_date
+                                , a.season
+                                , a.week
+                                , a.div_game
+                                , a.roof
+                                , a.surface
+                                , team_score
+                                , opponent_score
+                                , a.total
+                                , a.total_line
+                                , a.spread_line
+                                , (team_score - opponent_score) as game_spread
+                                , case when home_adv = 1 and (a.home_score - a.away_score) > a.spread_line then 1
+                                       when home_adv = 0 and (a.home_score - a.away_score) < a.spread_line then 1
+                                       else 0 end as spread_covered
+                                , case when a.total > a.total_line then 1 else 0 end as over_covered
+                                , off_pass_attempt
+                                , off_complete_pass
+                                , off_passing_yards
+                                , off_pass_touchdown
+                                , off_interception
+                                , off_pass_defended
+                                , off_pass_defended_adj
+                                , off_rush_attempt
+                                , off_rushing_yards
+                                , off_rush_touchdown
+                                , off_sack
+                                , off_fumble_forced
+                                , off_fumble_lost
+                                , off_first_down
+                                , off_fourth_down_converted
+                                , off_fourth_down_failed
+                                , off_third_down_converted
+                                , off_third_down_failed
+                                , off_penalty
+                                , defteam
+                                , def_pass_attempt
+                                , def_complete_pass
+                                , def_passing_yards
+                                , def_pass_touchdown
+                                , def_interception
+                                , def_pass_defended
+                                , def_pass_defended_adj
+                                , def_rush_attempt
+                                , def_rushing_yards
+                                , def_rush_touchdown
+                                , def_sack
+                                , def_fumble_forced
+                                , def_fumble_lost
+                                , def_first_down
+                                , def_fourth_down_converted
+                                , def_fourth_down_failed
+                                , def_third_down_converted
+                                , def_third_down_failed
+                                , def_penalty
+from off_stats_game a
+left join def_stats_game b
+  on a.posteam = b.defteam
+  and a.game_date = b.game_date
+  and a.season = b.season
+  and a.week = b.week")
+
+
+team_stat_season <- sqldf(" select team
+                                   , sum(spread_covered) as spread_wins
+                                   , count(week) - sum(spread_covered) as spread_losses
+                                   , round(avg(total_line), 2) as avg_OU
+                                   , sum(over_covered) as over_wins
+                                   , count(week)-sum(over_covered) as over_losses
+                                   , sum(team_score) as Points_scored
+                                   , sum(opponent_score) as Points_allowed
+                                   , round(avg(team_score), 2) as avg_points_scored
+                                   , round(avg(opponent_score), 2) as avg_points_allowed
+                                   , sum(off_pass_attempt) as off_pass_attempt
+                                   , sum(off_complete_pass) as off_complete_pass
+                                   , sum(off_complete_pass)/sum(off_pass_attempt) as off_completion_pct
+                                   , sum(off_passing_yards) as off_passing_yards
+                                   , sum(off_passing_yards)*.04 as FP_passing_yards
+                                   , sum(off_pass_touchdown) as off_pass_touchdown
+                                   , sum(off_pass_touchdown)*4 as FP_pass_touchdown
+                                   , sum(off_interception) as off_interception
+                                   , sum(off_interception)*-2 as FP_interception
+                                   , sum(off_pass_defended) as off_pass_defended
+                                   , sum(off_pass_defended)*-.5 as FP_pass_defended
+                                   , sum(off_pass_defended_adj) as off_pass_defended_adj
+                                   , sum(off_rush_attempt) as off_rush_attempt
+                                   , sum(off_rushing_yards) as off_rushing_yards
+                                   , sum(off_rushing_yards)*.1 as FP_rush_yards
+                                   , sum(off_rush_touchdown) as off_rush_touchdown
+                                   , sum(off_rush_touchdown)*6 as FP_rush_touchdown
+                                   , sum(off_sack) as off_sack
+                                   , sum(off_sack)*-.5 as FP_Sack
+                                   , sum(off_fumble_forced) as off_fumble_forced
+                                   , sum(off_fumble_forced)*-1 as FP_FF
+                                   , sum(off_fumble_lost) as off_fumble_lost
+                                   , sum(off_fumble_lost)*-2 as FP_FL
+                                   , sum(off_first_down) as off_first_down
+                                   , sum(off_fourth_down_converted) as off_fourth_down_converted
+                                   , sum(off_fourth_down_failed) as off_fourth_down_failed
+                                   , sum(off_fourth_down_converted)/(sum(off_fourth_down_converted)+sum(off_fourth_down_failed)) as fourth_down_pct
+                                   , sum(off_third_down_converted)/(sum(off_third_down_converted)+sum(off_third_down_failed)) as third_down_pct
+                                   , sum(off_third_down_converted) as off_third_down_converted
+                                   , sum(off_third_down_failed) as off_third_down_failed
+                                   , sum(off_penalty) as off_penalty
+                                   
+                                   , sum(def_pass_attempt) as def_pass_attempt
+                                   , sum(def_complete_pass) as def_complete_pass
+                                   , sum(def_complete_pass)/sum(def_pass_attempt) as def_completion_pct
+                                   , sum(def_passing_yards) as def_passing_yards
+                                   , sum(def_passing_yards)*.04 as def_FP_passing_yards
+                                   , sum(def_pass_touchdown) as def_pass_touchdown
+                                   , sum(def_pass_touchdown)*4 as def_FP_pass_touchdown
+                                   , sum(def_interception) as def_interception
+                                   , sum(def_interception)*-2 as def_FP_interception
+                                   , sum(def_pass_defended) as def_pass_defended
+                                   , sum(def_pass_defended)*-.5 as def_FP_pass_defended
+                                   , sum(def_pass_defended_adj) as def_pass_defended_adj
+                                   , sum(def_rush_attempt) as def_rush_attempt
+                                   , sum(def_rushing_yards) as def_rushing_yards
+                                   , sum(off_rushing_yards)*.1 as def_FP_rush_yards
+                                   , sum(def_rush_touchdown) as def_rush_touchdown
+                                   , sum(off_rush_touchdown)*6 as def_FP_rush_touchdown
+                                   , sum(def_sack) as def_sack
+                                   , sum(def_sack)*-.5 as def_FP_Sack
+                                   , sum(def_fumble_forced) as def_fumble_forced
+                                   , sum(def_fumble_forced)*-1 as def_FP_FF
+                                   , sum(def_fumble_lost) as def_fumble_lost
+                                   , sum(def_fumble_lost)*-2 as def_FP_FL
+                                   , sum(def_first_down) as def_first_down
+                                   , sum(def_fourth_down_converted) as def_fourth_down_allowed
+                                   , sum(def_fourth_down_failed) as def_fourth_down_stopped
+                                   , sum(def_fourth_down_converted)/(sum(def_fourth_down_converted)+sum(def_fourth_down_failed)) as def_fourth_down_pct
+                                   , sum(def_third_down_converted)/(sum(def_third_down_converted)+sum(def_third_down_failed)) as def_third_down_pct
+                                   , sum(def_third_down_converted) as def_third_down_converted
+                                   , sum(def_third_down_failed) as def_third_down_failed
+                                   , sum(def_penalty) as def_penalty
+                            from team_stats_game
+                            group by 1")
+
+FP_DF <- sqldf("select team
+                       , off_completion_pct
+                       , FP_passing_yards
+                       , FP_pass_touchdown
+                       , FP_interception
+                       , FP_pass_defended
+                       , FP_rush_yards
+                       , FP_rush_touchdown
+                       , FP_Sack
+                       , FP_FF
+                       , FP_FL
+                       , fourth_down_pct
+                       , third_down_pct
+                       , (10*off_completion_pct) + FP_passing_yards + FP_pass_touchdown + FP_interception + FP_pass_defended + FP_rush_yards + FP_rush_touchdown + FP_Sack + FP_FF + FP_FL + (10*fourth_down_pct) +(10*third_down_pct) as Offensive_Points
+                       , def_completion_pct
+                       , def_FP_passing_yards
+                       , def_FP_pass_touchdown
+                       , def_FP_interception
+                       , def_FP_pass_defended
+                       , def_FP_rush_yards
+                       , def_FP_rush_touchdown
+                       , def_FP_Sack
+                       , def_FP_FF
+                       , def_FP_FL
+                       , def_fourth_down_pct
+                       , def_third_down_pct
+                       , (10*def_completion_pct) + def_FP_passing_yards + def_FP_pass_touchdown + def_FP_interception + def_FP_pass_defended + def_FP_rush_yards + def_FP_rush_touchdown + def_FP_Sack + def_FP_FF + def_FP_FL + (10*def_fourth_down_pct) +(10*def_third_down_pct) as Defensive_points
+                from team_stat_season")
+
+                       
+FPrank_DF <- sqldf("select *
+                    , ROW_NUMBER ( ) OVER (Order By Offensive_Points desc) as Offensive_rank
+                    , ROW_NUMBER ( ) OVER (Order By Defensive_Points) as Defensive_rank
+                    from FP_DF")
+
+
+
+```
+
+#First Drive Results
+## Looking at how each team's first drive results as a summary and the play by play to see a general and specific view of the team's success
+
+
+
+```{r}
+#Grabbing all the plays from the first two drives of the game to see how each team performs on their first drive of the game
+fd_df<- sqldf("select game_id
+              , posteam
+              , defteam
+              , drive_play_count
+              , drive_time_of_possession
+              , drive_first_downs
+              , drive_inside20
+              , drive_ended_with_score
+              , drive_game_clock_start
+              , drive_game_clock_end
+              , drive_start_yard_line
+              , drive_end_yard_line
+              , fixed_drive_result
+              , play_type_nfl
+              , yards_gained
+              , ydsnet
+              , yardline_100
+              , yrdln
+              , pass_length
+              , pass_location
+              , air_yards
+              , yards_after_catch
+              , run_location
+              , run_gap
+              , field_goal_result
+              , td_team
+              , td_player_name
+              , posteam_score
+              , fg_prob
+              , td_prob
+              , ep
+              , epa
+              , wp
+              , wpa
+              , first_down_rush
+              , first_down_pass
+              , first_down_penalty
+              , third_down_converted
+              , third_down_failed
+              , fourth_down_converted
+              , fourth_down_failed
+              , incomplete_pass
+              , interception
+              , fumble_forced
+              , fumble_not_forced
+              , fumble
+              , qb_hit
+              , sack
+              , rush_attempt
+              , pass_attempt
+              , touchdown
+              , pass_touchdown
+              , rush_touchdown
+              , return_touchdown
+              , field_goal_attempt
+              , punt_attempt
+              , series
+              , series_success
+              , series_result
+       from pbp
+       where drive in ('1','2');")
+
+
+#Bringing in Offensives and Defensive ranks to understand a team's performance from how the year went
+fd_df2 <- sqldf("select game_id
+                        , posteam
+                        , defteam
+                        , fixed_drive_result
+                        , drive_play_count
+                        , drive_time_of_possession
+                        , drive_first_downs
+                        , drive_inside20
+                        , drive_ended_with_score
+                        , drive_game_clock_start
+                        , drive_game_clock_end
+                        , drive_start_yard_line
+                        , drive_end_yard_line
+                        , play_type_nfl
+                        , b.Offensive_rank
+                        , c.Defensive_rank
+                from fd_df a
+                left join FPrank_DF b
+                on a.posteam = b.team
+                left join FPrank_DF c
+                on a.defteam = c.team")
+
+#Creating flags to help define a successful drive depending on the results
+fd_df3 <- sqldf("select distinct game_id
+                        , posteam
+                        , case when fixed_drive_result = 'Field goal' or fixed_drive_result = 'Missed field goal' then 1 else 0 end as field_goal_attempts
+                        , case when fixed_drive_result = 'Touchdown' then 1 else 0 end as Touchdown_score
+                        , case when fixed_drive_result = 'Punt' then 1 else 0 end as Punted
+                        , case when fixed_drive_result in ('Opp touchdown', 'Turnover on downs', 'Turnover') then 1 else 0 end as Turnover
+                        , drive_play_count
+                        , drive_time_of_possession
+                        , drive_first_downs
+                        , drive_inside20
+                        , drive_ended_with_score
+                        , drive_game_clock_start
+                        , drive_game_clock_end
+                        , drive_start_yard_line
+                        , drive_end_yard_line
+                from fd_df")
+
+#Aggregating the results to see a full season summary for each team through out the season
+fd_df4 <- sqldf("select posteam
+                        , sum(field_goal_attempts) as field_goal_attempts
+                        , sum(Touchdown_score) as Touchdown_score
+                        , sum(Punted) as Punted
+                        , sum(Turnover) as Turnover
+                        , round(avg(drive_play_count), 2) as avg_drive_play_count
+                        , sum(drive_play_count) as total_play_count
+                        , round(avg(drive_time_of_possession), 2) as avg_drive_time_of_possession
+                        , sum(drive_first_downs) as total_first_downs
+                        , round(avg(drive_first_downs), 2) as avg_first_downs
+                        , sum(drive_inside20) as drives_inside20
+                        , round(avg(drive_start_yard_line), 2) as drive_start_yard_line
+                 from fd_df3
+                 where posteam is not NULL
+                 group by 1;")
+
+#view(sqldf("select * from fd_df where posteam is NULL;"))
+
+#colnames(pbp)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
